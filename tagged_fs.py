@@ -22,13 +22,13 @@ class TaggedFS(LoggingMixIn, Operations):
     METADATA_FNAME         = "config.json"
     METADATA_TAGS_FOLDER   = "tags_folder"
     METADATA_FILE_FOLDER   = "file_folder"
-    METADATA_QUERY_FOLDER  = "query_folder"
+    METADATA_ACTION_FOLDER = "action_folder"
     METADATA_INODE_COUNTER = "inode_counter"
 
     # Default values
     DEFAULT_TAGS_FOLDER    = "tags"
     DEFAULT_FILE_FOLDER    = "files"
-    DEFAULT_QUERY_FOLDER   = "query"
+    DEFAULT_ACTION_FOLDER  = "action"
 
 
     def __init__(self, path='.'):
@@ -41,7 +41,7 @@ class TaggedFS(LoggingMixIn, Operations):
 
             self.tags_folder   = TaggedFS.DEFAULT_TAGS_FOLDER
             self.file_folder   = TaggedFS.DEFAULT_FILE_FOLDER
-            self.query_folder = TaggedFS.DEFAULT_QUERY_FOLDER
+            self.action_folder = TaggedFS.DEFAULT_ACTION_FOLDER
             self.inode_counter = 0
             
             self.initFilesystem()
@@ -88,7 +88,7 @@ class TaggedFS(LoggingMixIn, Operations):
         else:
             # Ensure that a correct action is being taken
             action = self.getAction(path)
-            if action not in [self.tags_folder, self.file_folder, self.query_folder]:
+            if action not in [self.tags_folder, self.file_folder, self.action_folder]:
                 raise FuseOSError(errno.EINVAL)
 
             # Ensure that file is in search results, and get full path
@@ -287,13 +287,13 @@ class TaggedFS(LoggingMixIn, Operations):
             shutil.rmtree(os.path.join(self.root, self.tags_folder))
         if os.path.exists(os.path.join(self.root, self.file_folder)):
             shutil.rmtree(os.path.join(self.root, self.file_folder))
-        if os.path.exists(os.path.join(self.root, self.query_folder)):
-            shutil.rmtree(os.path.join(self.root, self.query_folder))
+        if os.path.exists(os.path.join(self.root, self.action_folder)):
+            shutil.rmtree(os.path.join(self.root, self.action_folder))
 
         # Create necessary folders
         os.makedirs(os.path.join(self.root, self.tags_folder))
         os.makedirs(os.path.join(self.root, self.file_folder))
-        os.makedirs(os.path.join(self.root, self.query_folder))
+        os.makedirs(os.path.join(self.root, self.action_folder))
 
         # Store the filesystem state
         self.saveMetadataFile()
@@ -302,7 +302,7 @@ class TaggedFS(LoggingMixIn, Operations):
         metadata = {
             TaggedFS.METADATA_TAGS_FOLDER   : self.tags_folder,
             TaggedFS.METADATA_FILE_FOLDER   : self.file_folder,
-            TaggedFS.METADATA_QUERY_FOLDER : self.query_folder,
+            TaggedFS.METADATA_ACTION_FOLDER : self.action_folder,
             TaggedFS.METADATA_INODE_COUNTER : self.inode_counter,
         }
         json.dump(metadata, open(os.path.join(self.root, TaggedFS.METADATA_FNAME), "w"))
@@ -311,7 +311,7 @@ class TaggedFS(LoggingMixIn, Operations):
         metadata = json.load(open(os.path.join(self.root, TaggedFS.METADATA_FNAME), "r"))
         self.tags_folder   = metadata[TaggedFS.METADATA_TAGS_FOLDER]
         self.file_folder   = metadata[TaggedFS.METADATA_FILE_FOLDER]
-        self.query_folder = metadata[TaggedFS.METADATA_QUERY_FOLDER]
+        self.action_folder = metadata[TaggedFS.METADATA_ACTION_FOLDER]
         self.inode_counter = metadata[TaggedFS.METADATA_INODE_COUNTER]
 
 if __name__ == '__main__':
