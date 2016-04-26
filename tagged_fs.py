@@ -74,7 +74,7 @@ class TaggedFS(LoggingMixIn, Operations):
 
         # Determine what to do from the folder action
         action = path.get_action()
-        print("Action: " + action)
+
         # Treat tag & file folders normally
         if action == self.tags_folder or action == self.file_folder:
             st = os.lstat(path.get_path())
