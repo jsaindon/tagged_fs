@@ -1,7 +1,12 @@
+"""
+tag_ops.py - contains classes and functions relevant to
+parsing and processing tag queries
+"""
+
 import ast
 import os
 
-class TagOperation(object):
+class TagQuery(object):
 	"""
 	Base class for performing tag query operations.
 	Should be overridden by implementation classes.
@@ -20,7 +25,7 @@ class TagOperation(object):
 			raise ValueError("Missing value for folder containing tags")
 		return set()
 
-class BinTagOperation(TagOperation):
+class BinTagQuery(TagQuery):
 
 	UNION = "+" # In either
 	INTERSECT = "&" # In both
@@ -38,7 +43,7 @@ class BinTagOperation(TagOperation):
 		self.op = op
 
 	def eval(self, tag_folder_path=None):
-		TagOperation.eval(self, tag_folder_path)
+		TagQuery.eval(self, tag_folder_path)
 
 		left_set = self.left.eval(tag_folder_path)
 		right_set = self.right.eval(tag_folder_path)
@@ -55,13 +60,13 @@ class BinTagOperation(TagOperation):
 		
 		raise NotImplementedError("Missing implementation for operator: " + self.op)
 
-class UnaryTagOperation(TagOperation):
+class UnaryTagQuery(TagQuery):
 	def __init__(self, tag, tag_folder_path=None):
 		super().__init__(tag_folder_path)
 		self.tag = tag
 
 	def eval(self, tag_folder_path=None):
-		TagOperation.eval(self, tag_folder_path)
+		TagQuery.eval(self, tag_folder_path)
 
 		# Search tag directory for the tag, and return the corresponding inodes
 		tag_dir = os.path.join(self.tag_folder_path, self.tag)
@@ -73,7 +78,7 @@ class UnaryTagOperation(TagOperation):
 
 class TagQueryParser():
 	"""
-	Parses a string into a TagOperation, which can be
+	Parses a string into a TagQuery, which can be
 	evaluated to get the set of tags associated with
 	the query.
 	"""
@@ -87,7 +92,7 @@ class TagQueryParser():
 	def parseUnaryOp(self, unop):
 		if type(unop) != ast.Name:
 			raise ValueError("Argument must be an expression of type ast.Name")
-		return UnaryTagOperation(unop.id)		
+		return UnaryTagQuery(unop.id)		
 
 	def parseBinOp(self, binop):
 		if type(binop) != ast.BinOp:
@@ -101,18 +106,18 @@ class TagQueryParser():
 		optype = type(binop.op)
 
 		if optype == ast.Add:
-			op = BinTagOperation.UNION
+			op = BinTagQuery.UNION
 		elif optype == ast.BitAnd:
-			op = BinTagOperation.INTERSECT
+			op = BinTagQuery.INTERSECT
 		elif optype == ast.Sub:
-			op = BinTagOperation.DIFF
+			op = BinTagQuery.DIFF
 		elif optype == ast.BitXor:
-			op = BinTagOperation.SYMDIFF
+			op = BinTagQuery.SYMDIFF
 
 		if not op:
 			raise ValueError("Bad binary operator")
 
-		return BinTagOperation(left, right, op)
+		return BinTagQuery(left, right, op)
 
 	def parseValue(self, value):
 		if type(value) == ast.Name:
@@ -122,4 +127,7 @@ class TagQueryParser():
 
 	def parse(self):
 		return self.parseValue(self.expr.value)
+
+def get_query_inodes(query, tag_folder):
+    return list(TagQueryParser(query).parse().eval(tag_folder))
 

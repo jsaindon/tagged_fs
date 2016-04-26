@@ -7,6 +7,8 @@ import os
 import json
 import shutil
 import stat
+import tag_ops
+import utils
 
 from fuse import FUSE, Operations, LoggingMixIn, FuseOSError
 
@@ -16,7 +18,7 @@ class TaggedFS(LoggingMixIn, Operations):
     A tagged filesystem.
     '''
 
-    QUERY_DELIM            = "$" # Separates tag queries from filenames (i.e. /<tag>/$/<filename>)
+    #QUERY_DELIM            = "$" # Separates tag queries from filenames (i.e. /<tag>/$/<filename>)
 
     # Metadata constants
     METADATA_FNAME         = "config.json"
@@ -58,61 +60,63 @@ class TaggedFS(LoggingMixIn, Operations):
         raise FuseOSError(errno.ENOSYS)
 
     def destroy(self, path):
-        raise FuseOSError(errno.ENOSYS)
+        # Store the filesystem state
+        self.saveMetadataFile()
 
-    def getattr(self, path, fh=None):
+    def getattr(self, rel_path, fh=None):
+        path = utils.Path(rel_path, self.root)
+
         # special case for root
-        if path == "/":
-            st = os.lstat(self.absPath(path))
+        if path.is_root(self.root):
+            st = os.lstat(path.get_path())
             return dict((key, getattr(st, key)) for key in ('st_atime', 'st_gid',
                 'st_mode', 'st_mtime', 'st_size', 'st_uid'))
 
+        # Determine what to do from the folder action
+        action = path.get_action()
+        print("Action: " + action)
+        # Treat tag & file folders normally
+        if action == self.tags_folder or action == self.file_folder:
+            st = os.lstat(path.get_path())
+            return dict((key, getattr(st, key)) for key in ('st_atime', 'st_gid',
+                'st_mode', 'st_mtime', 'st_size', 'st_uid'))
 
-        print("path: " + path)
-        split_path = path.split(TaggedFS.QUERY_DELIM)
+        if action != self.action_folder:
+            raise FuseOSError(errno.ENOENT) # not a valid directory in our filesystem
 
-        # If no query delimiter, or not in tags, query is incomplete
-        # hack: we pretend it's a generic directory to get to the rest of the query
-        # Special case: creating a tag needs to be able to check for tag existence
-        if len(split_path) < 2:
-            action = self.getAction(path)
-            if action == self.tags_folder:
-                st = os.lstat(self.absPath(path))
-                return dict((key, getattr(st, key)) for key in ('st_atime', 'st_gid',
-                    'st_mode', 'st_mtime', 'st_size', 'st_uid'))
+        # Check if file 
+        components = path.get_components()
+        if len(components) > 2:
 
-            filepath = self.absPath(path.split('/')[-1])
-            print(filepath)
-            return dict([('st_atime', 0), ('st_gid', 0), ('st_mode', stat.S_IFDIR), 
-                ('st_mtime', 0), ('st_size', 0), ('st_uid', 0)])
-        else:
-            # Ensure that a correct action is being taken
-            action = self.getAction(path)
-            if action not in [self.tags_folder, self.file_folder, self.action_folder]:
-                raise FuseOSError(errno.EINVAL)
+            # Must be a file, so attempt search
+            result = self.getFilepath(path)
 
-            # Ensure that file is in search results, and get full path
-            query_path, fname = split_path
+            if not result:
+                # Couldn't find the file
+                raise FuseOSError(errno.ENOENT)
 
-            # If filename is empty, we've hit the delimiter and need to skip to the next call
-            if not fname:
-                return dict([('st_atime', 0), ('st_gid', 0), ('st_mode', stat.S_IFDIR), 
-                    ('st_mtime', 0), ('st_size', 0), ('st_uid', 0)])
+            # We've found the file path!
+            fpath, _ = result
+            st = os.lstat(fpath.get_path())
+            return dict((key, getattr(st, key)) for key in ('st_atime', 'st_gid',
+                'st_mode', 'st_mtime', 'st_size', 'st_uid'))
 
-            filepaths = self.tagSearch(query_path)
-            filepath = self.absPath(os.path.join(self.tags_folder, next(fpath for fpath in filepaths if fpath.split('/')[-1] == fname)))
-            print(filepath)
-        st = os.lstat(filepath)
-        return dict((key, getattr(st, key)) for key in ('st_atime', 'st_gid',
-            'st_mode', 'st_mtime', 'st_size', 'st_uid'))
+        # Otherwise, must be a query string
+        # Since a query path refers to a virtual (non-existent) directory,
+        # we return default directory attributes
+        return dict([('st_atime', 0), ('st_gid', 0), ('st_mode', stat.S_IFDIR), 
+            ('st_mtime', 0), ('st_size', 0), ('st_uid', 0)])
+
+        ###### OLD STUFF ######
 
     getxattr = None
 
-    def mkdir(self, path, mode):
-        components = path.lstrip('/').split('/')
+    def mkdir(self, rel_path, mode):
+        path = utils.Path(rel_path, self.root)
+        components = path.get_components()
 
         # Ensure that action is to create tags
-        action = components[0]
+        action = path.get_action()
 
         if action != self.tags_folder:
             raise FuseOSError(errno.EPERM)
@@ -127,26 +131,43 @@ class TaggedFS(LoggingMixIn, Operations):
             self.addTag(tag)
         return
 
-    def read(self, path, size, offset, fh):
+    def read(self, rel_path, size, offset, fh):
+        path = utils.Path(rel_path, self.root)
+
+        # Must be a file, so attempt search
+        result = self.getFilepath(path)
+        if not result:
+            # Couldn't find the file
+            raise FuseOSError(errno.ENOENT)
+
+        # We've found the file path!
+        fpath, inode = result
+        fh = open(fpath, "rb")
+
         os.lseek(fh, offset, os.SEEK_SET)
         return os.read(fh, length)
 
-    def readdir(self, path, fh):
-        #return ['hello_world'] # placeholder for testing
-        query_path, fname = self.splitQueryPath(path)
+    def readdir(self, rel_path, fh):
+        path = utils.Path(rel_path, self.root)
+        action = path.get_action()
 
-        action = self.getAction(query_path)
+        # For tags or file folders, standard behavior
+        if action == self.tags_folder or action == self.file_folder:
+            return os.listdir(path.get_path())
 
-        # For tags folder, show all tags
-        if action == self.tags_folder:
-            return os.listdir(self.absPath(self.tags_folder))
+        if action != self.action_folder:
+            raise FuseOSError(errno.ENOENT) # not a valid directory in our filesystem
 
-        # For files folder, <Either error or all files?>
+        # Perform tag query, return corresponding filenames
+        query = path.get_query()
+        if not query:
+            raise FuseOSError(errno.EINVAL)
 
-        if len(fname) > 0:
-            raise FuseOSError(errno.ENOTDIR)
+        tag_folder = os.path.join(self.root, self.tags_folder)
+        inodes = tag_ops.get_query_inodes(query, tag_folder)
+        filepaths = self.getInodeFilepaths(inodes)        
 
-        return [fpath[-1] for fpath in self.tagSearch(query_path)]
+        return [fpath.get_components()[-1] for fpath, _ in filepaths]
 
     def readlink(self, path):
         raise FuseOSError(errno.ENOSYS)
@@ -154,17 +175,17 @@ class TaggedFS(LoggingMixIn, Operations):
     def rename(self, old, new):
         raise FuseOSError(errno.ENOSYS)
 
-    def rmdir(self, path):
-        components = path.lstrip('/').split('/')
+    def rmdir(self, rel_path):
+        path = utils.Path(rel_path, self.root)
 
         # Ensure that action is to remove a tag
-        action = components[0]
+        action = path.get_action()
 
         if action != self.tags_folder:
             raise FuseOSError(errno.EPERM)
 
         # Remove each tag in path
-        tags = components[1:]
+        tags = path.get_components()[1:]
 
         if len(tags) <= 0:
             raise FuseOSError(errno.EINVAL)
@@ -185,19 +206,25 @@ class TaggedFS(LoggingMixIn, Operations):
     def utimens(self, path, times=None):
         raise FuseOSError(errno.ENOSYS)
 
-    def write(self, path, data, offset, fh):
+    def write(self, rel_path, data, offset, fh):
+        path = utils.Path(rel_path, self.root)
+
+        # Must be a file, so attempt search
+        result = self.getFilepath(path)
+        if not result:
+            # Couldn't find the file
+            raise FuseOSError(errno.ENOENT)
+
+        # We've found the file path!
+        fpath, inode = result
+        fh = open(fpath, "r+b")
+
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, data)
 
     ####################
     # Helper functions #
     ####################
-
-    def getAction(self, path):
-        return path.lstrip('/').split('/')[0]
-
-    def absPath(self, path):
-        return os.path.join(self.root, path.lstrip('/'))
 
     def addTag(self, tag):
         tag_path = os.path.join(self.root, self.tags_folder, tag)
@@ -208,77 +235,44 @@ class TaggedFS(LoggingMixIn, Operations):
         os.makedirs(tag_path)
 
     def removeTag(self, tag):
-        tag_path = self.absPath(os.path.join(self.tags_folder, tag))
+        tag_path = os.path.join(self.root, self.tags_folder, tag)
 
         if not os.path.isdir(tag_path):
             raise FuseOSError(errno.ENOTDIR)
 
         shutil.rmtree(tag_path)
 
-    '''
-    Search functions
-    '''
-
-    def splitQueryPath(self, path):
-        # Return values:
-        #   query_path
-        #   filename (possibly empty)
-        split_path = path.split(TaggedFS.QUERY_DELIM)
-
-        # If no query delimiter, not valid query
-        if len(split_path) < 2:
-            raise FuseOSError(errno.EINVAL)
-        
-        query_path, after_delim = split_path
-        fname = after_delim.lstrip('/')
-        return query_path, fname
-
-    def tagSearch(self, rel_path):
-        """
-        Searches the filesystem based on the relative path query.
-        Returns a list of filepaths that match the query.
-        """
-        components = rel_path.split('/')[1:] # Ignore empty string from root '/'
-
-        # Action folder required
-        if len(components) <= 0:
-            raise(FuseOSError(errno.EACCES))
-
-        action = components[0]
-        tags = components[1:]
-
-        if len(tags) <= 0:
-            return [] # no tags = no results
-
-        # Get relevants files for each tag
-        resultSets = [set(self.getFilesForTag(tag)) for tag in tags]
-
-        # Return intersection of tags results
-        searchResults = resultSets[0]
-        for resultSet in resultSets[1:]:
-            searchResults = searchResults & resultSet
-
-        return list(searchResults)
-
-    def getFilesForTag(self, tag):
-        print(os.path.join(self.root, self.tags_folder, tag))
-        inodes = os.listdir(os.path.join(self.root, self.tags_folder, tag))
-
+    def getInodeFilepaths(self, inodes):
         filepaths = []
         for inode in inodes:
-            filefolder = os.path.join(self.root, "/".join([char for char in str(inode)]))
-            files = [fname for fname in os.listdir(filefolder) if os.path.isfile(os.path.join(filefolder, fname))]
+            filefolder = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+            files = [fname for fname in os.listdir(filefolder.get_path()) if os.path.isfile(os.path.join(filefolder.get_path(), fname))]
 
             if len(files) == 0:
                 continue
 
-            filepaths.append(os.path.join(filefolder, files[0]))
+            fpath = utils.Path.join_paths(filefolder, utils.Path(fname))
+            filepaths.append((fpath, inode))
 
         return filepaths
 
-    ''' 
-    Filesystem state functions
-    '''
+    def getFilepath(self, path):
+        query = path.get_query()
+        if not query:
+            raise FuseOSError(errno.EINVAL)
+
+        tag_folder = os.path.join(self.root, self.tags_folder)
+        inodes = tag_ops.get_query_inodes(query, tag_folder)
+        fpaths = self.getInodeFilepaths(inodes)
+
+        for fpath, inode in fpaths:
+            if fpath.get_components()[-1] == components[-1]:
+                return fpath, inode
+        return None
+
+    ##############################
+    # Filesystem State Functions #
+    ##############################
 
     def initFilesystem(self):
         # Delete any existing folders, since we're
