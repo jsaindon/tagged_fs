@@ -58,23 +58,44 @@ class TaggedFS(LoggingMixIn, Operations):
 
     def create(self, path, mode):
         # TODO: IMPLEMENT
+        path_obj = Path(raw_path)
+        action   = path_obj.get_action()
+        query    = path_obj.get_query()
+        filename = path_obj.get_filename
+
         # Ensure that action = /action, query != None, and file != None
+        if action != self.action_folder or not query or not filename:
+            raise FuseOSError(errno.ENOENT)
 
         # Ensure that query only contains alphanumeric chars and '+' (otherwise errno bad path)
+        if not query.isalnum():
+            raise FuseOSError(errno.EBADF)
 
         # Strip tags from query component
         # getTags(path_obj.get_query()), should be in form tag1+tag2+tag3+...+tagn
+        tags = query.split('+')
 
         # Create tags if they don't exist
-        # addTag(tag) for each tag that doesn't already exist
+        for tag in tags:
+            tag_path = os.path.join(self.root, self.tags_folder, tag)
+            if not os.path.isdir(tag_path):
+                self.addTag(tag)
 
         # Assign inode for file (and increment inode!)
-        # Create file in /files/<reverse_inode_stuff>/filename
-        # For each tag in query_tags, add inode to tags/<tag>
-            ### MAYBE NOT ACTUALLY # Set { inode: count } in reference_count dict, where count = # of tags
-        # Flush changes to metadata file
+        inode = self.inode_counter
+        self.inode_counter += 1
 
-        raise FuseOSError(errno.ENOSYS)
+        # Create file in /files/<reverse_inode_stuff>/filename
+        filepath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root, filename)
+        os.open(filepath.get_path(), os.O_WRONLY | os.O_CREAT, mode)
+
+        # For each tag in query_tags, add inode to tags/<tag>
+        for tag in tags:
+            tag_file = os.path.join(self.root, self.tags_folder, tag, inode)
+            os.makedirs(tag_file)
+
+        # Flush changes to metadata file
+        self.saveMetadataFile()
 
     def destroy(self, path):
         # Store the filesystem state
@@ -278,9 +299,11 @@ class TaggedFS(LoggingMixIn, Operations):
 
     def addFile(self, inode, fname):
         # TODO
+        raise FuseOSError(errno.ENOSYS)
 
     def removeFile(self, inode, fname):
         # TODO
+        raise FuseOSError(errno.ENOSYS)
 
     def getInodeFilepath(self, inode):
         filefolder = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
