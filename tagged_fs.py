@@ -57,42 +57,37 @@ class TaggedFS(LoggingMixIn, Operations):
         raise FuseOSError(errno.ENOSYS)
 
     def create(self, path, mode):
-        # TODO: IMPLEMENT
         path_obj = Path(raw_path)
         action   = path_obj.get_action()
         query    = path_obj.get_query()
-        filename = path_obj.get_filename
+        filename = path_obj.get_filename()
 
         # Ensure that action = /action, query != None, and file != None
         if action != self.action_folder or not query or not filename:
             raise FuseOSError(errno.ENOENT)
 
         # Ensure that query only contains alphanumeric chars and '+' (otherwise errno bad path)
-        if not query.isalnum():
-            raise FuseOSError(errno.EBADF)
+        for c in query:
+            if not c.isalnum() and not (c == "+"):
+                raise FuseOSError(errno.EBADF)
 
         # Strip tags from query component
-        # getTags(path_obj.get_query()), should be in form tag1+tag2+tag3+...+tagn
         tags = query.split('+')
 
-        # Create tags if they don't exist
-        for tag in tags:
-            tag_path = os.path.join(self.root, self.tags_folder, tag)
-            if not os.path.isdir(tag_path):
-                self.addTag(tag)
 
         # Assign inode for file (and increment inode!)
         inode = self.inode_counter
         self.inode_counter += 1
 
-        # Create file in /files/<reverse_inode_stuff>/filename
-        filepath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root, filename)
-        os.open(filepath.get_path(), os.O_WRONLY | os.O_CREAT, mode)
+        # Create file
+        self.addFile(inode, filename, mode)
 
-        # For each tag in query_tags, add inode to tags/<tag>
+        # Create tags if they don't exist and add inode dir entry to each tag
         for tag in tags:
-            tag_file = os.path.join(self.root, self.tags_folder, tag, inode)
-            os.makedirs(tag_file)
+            tag_path = os.path.join(self.root, self.tags_folder, tag)
+            if not os.path.isdir(tag_path):
+                self.addTag(tag)
+            os.makedirs(os.path.join(tag_path, str(inode)))
 
         # Flush changes to metadata file
         self.saveMetadataFile()
@@ -144,8 +139,6 @@ class TaggedFS(LoggingMixIn, Operations):
         # we return default directory attributes
         return dict([('st_atime', 0), ('st_gid', 0), ('st_mode', stat.S_IFDIR), 
             ('st_mtime', 0), ('st_size', 0), ('st_uid', 0)])
-
-        ###### OLD STUFF ######
 
     getxattr = None
 
@@ -205,22 +198,40 @@ class TaggedFS(LoggingMixIn, Operations):
         inodes = tag_ops.get_query_inodes(query, tag_folder)
         filepaths = self.getInodeFilepaths(inodes)        
 
-        return [fpath.get_components()[-1] for fpath, _ in filepaths]
+        return [fpath.get_filename() for fpath, _ in filepaths]
 
     def readlink(self, path):
         raise FuseOSError(errno.ENOSYS)
 
     def rename(self, old, new):
-        # TODO: IMPLEMENT
+        path_obj = Path(new)
+        action   = path_obj.get_action()
+        query    = path_obj.get_query()
+        filename = path_obj.get_filename()
+
+        # Ensure that new tags path component only contains alphanumeric chars and '+' (otherwise errno bad path)
+        for c in query:
+            if not c.isalnum() and not (c == "+"):
+                raise FuseOSError(errno.EBADF)
 
         # Parse all tags from 'new', w/ format tag1+...+tagn (ensure at least 1+)
+        new_tags = c.split("+")
 
-        # Find file (inode + filepath)
+        # Find existing file (inode + filepath)
+        fpath, inode = self.getFilepath(old)
 
         # Remove inode from all tags containing it
+        for tag in os.listdir(os.path.join(self.root, self.tags_folder):
+            inode_path = os.path.join(self.root, self.tags_folder, tag, str(inode))
+            if os.path.isdir(inode_path):
+                os.rmdir(inode_path)
 
-        # Add inode to all tags specified in the 'new' path
-        raise FuseOSError(errno.ENOSYS)
+        # Create new tags if they don't exist and add inode dir entry to them
+        for tag in new_tags:
+            tag_path = os.path.join(self.root, self.tags_folder, tag)
+            if not os.path.isdir(tag_path):
+                self.addTag(tag)
+            os.makedirs(os.path.join(tag_path, str(inode)))
 
     def rmdir(self, rel_path):
         path = utils.Path(rel_path, self.root)
@@ -248,14 +259,17 @@ class TaggedFS(LoggingMixIn, Operations):
         raise FuseOSError(errno.ENOSYS)
 
     def unlink(self, path):
-        # TODO: IMPLEMENT
-
         # Find file (inode + filepath)
+        fpath, inode = self.getFilepath(path)
 
         # Remove inode from all tags containing it
+        for tag in os.listdir(os.path.join(self.root, self.tags_folder):
+            inode_path = os.path.join(self.root, self.tags_folder, tag, str(inode))
+            if os.path.isdir(inode_path):
+                os.rmdir(inode_path)
 
         # Remove file
-        raise FuseOSError(errno.ENOSYS)
+        self.removeFile(inode, fpath.get_filename())
 
     def utimens(self, path, times=None):
         raise FuseOSError(errno.ENOSYS)
@@ -297,13 +311,21 @@ class TaggedFS(LoggingMixIn, Operations):
 
         shutil.rmtree(tag_path)
 
-    def addFile(self, inode, fname):
-        # TODO
-        raise FuseOSError(errno.ENOSYS)
+    def addFile(self, inode, fname, mode):
+        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+        fpath = utils.Path.join_paths(fpath, utils.Path(fname))
+        
+        # Create file
+        os.open(fpath.get_path(), os.O_WRONLY | os.O_CREAT, mode)
+        return
 
     def removeFile(self, inode, fname):
-        # TODO
-        raise FuseOSError(errno.ENOSYS)
+        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+        fpath = utils.Path.join_paths(fpath, utils.Path(fname))
+        
+        # Remove file if it exists
+        os.remove(fpath)
+        return
 
     def getInodeFilepath(self, inode):
         filefolder = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
@@ -324,9 +346,11 @@ class TaggedFS(LoggingMixIn, Operations):
 
         return filepaths
 
-    def getFilepath(self, path):
+    def getFilepath(self, raw_path):
+        path = utils.Path(raw_path)
         query = path.get_query()
-        if not query:
+        fname = path.get_filename()
+        if not query or not fname:
             raise FuseOSError(errno.EINVAL)
 
         tag_folder = os.path.join(self.root, self.tags_folder)
@@ -334,7 +358,7 @@ class TaggedFS(LoggingMixIn, Operations):
         fpaths = self.getInodeFilepaths(inodes)
 
         for fpath, inode in fpaths:
-            if fpath.get_components()[-1] == components[-1]:
+            if fpath.get_filename() == fname:
                 return fpath, inode
         return None
 

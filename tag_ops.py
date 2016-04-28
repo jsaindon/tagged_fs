@@ -73,7 +73,7 @@ class UnaryTagQuery(TagQuery):
 		if not os.path.isdir(tag_dir):
 			raise NotADirectoryError("No directory for tag: " + self.tag)
 
-		inodes = os.listdir(tag_dir)
+		inodes = [int(inode.strip("/")) for inode in os.listdir(tag_dir)]
 		return set(inodes)
 
 class TagQueryParser():
