@@ -35,7 +35,7 @@ class Path:
 		return None
 
 	def get_filename(self):
-		if len(self.components) == 3:
+		if len(self.components) >= 3:
 			return self.components[-1]
 		return None
 

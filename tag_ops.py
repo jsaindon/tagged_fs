@@ -71,7 +71,8 @@ class UnaryTagQuery(TagQuery):
 		# Search tag directory for the tag, and return the corresponding inodes
 		tag_dir = os.path.join(self.tag_folder_path, self.tag)
 		if not os.path.isdir(tag_dir):
-			raise NotADirectoryError("No directory for tag: " + self.tag)
+			return set() # Tag doesn't exist, so return empty set
+			#raise NotADirectoryError("No directory for tag: " + self.tag)
 
 		inodes = [int(inode.strip("/")) for inode in os.listdir(tag_dir)]
 		return set(inodes)

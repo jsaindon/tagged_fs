@@ -57,7 +57,7 @@ class TaggedFS(LoggingMixIn, Operations):
         raise FuseOSError(errno.ENOSYS)
 
     def create(self, path, mode):
-        path_obj = Path(raw_path)
+        path_obj = utils.Path(path)
         action   = path_obj.get_action()
         query    = path_obj.get_query()
         filename = path_obj.get_filename()
@@ -121,8 +121,8 @@ class TaggedFS(LoggingMixIn, Operations):
         components = path.get_components()
         if len(components) > 2:
 
-            # Must be a file, so attempt search
-            result = self.getFilepath(path)
+            # Must be a filename, so attempt search
+            result = self.getFilepath(rel_path)
 
             if not result:
                 # Couldn't find the file
@@ -173,7 +173,7 @@ class TaggedFS(LoggingMixIn, Operations):
 
         # We've found the file path!
         fpath, inode = result
-        fh = open(fpath, "rb")
+        fh = open(fpath.get_path(), "rb")
 
         os.lseek(fh, offset, os.SEEK_SET)
         return os.read(fh, length)
@@ -196,7 +196,7 @@ class TaggedFS(LoggingMixIn, Operations):
 
         tag_folder = os.path.join(self.root, self.tags_folder)
         inodes = tag_ops.get_query_inodes(query, tag_folder)
-        filepaths = self.getInodeFilepaths(inodes)        
+        filepaths = self.getInodeFilepaths(inodes)
 
         return [fpath.get_filename() for fpath, _ in filepaths]
 
@@ -204,7 +204,7 @@ class TaggedFS(LoggingMixIn, Operations):
         raise FuseOSError(errno.ENOSYS)
 
     def rename(self, old, new):
-        path_obj = Path(new)
+        path_obj = utils.Path(new)
         action   = path_obj.get_action()
         query    = path_obj.get_query()
         filename = path_obj.get_filename()
@@ -221,7 +221,7 @@ class TaggedFS(LoggingMixIn, Operations):
         fpath, inode = self.getFilepath(old)
 
         # Remove inode from all tags containing it
-        for tag in os.listdir(os.path.join(self.root, self.tags_folder):
+        for tag in os.listdir(os.path.join(self.root, self.tags_folder)):
             inode_path = os.path.join(self.root, self.tags_folder, tag, str(inode))
             if os.path.isdir(inode_path):
                 os.rmdir(inode_path)
@@ -263,7 +263,7 @@ class TaggedFS(LoggingMixIn, Operations):
         fpath, inode = self.getFilepath(path)
 
         # Remove inode from all tags containing it
-        for tag in os.listdir(os.path.join(self.root, self.tags_folder):
+        for tag in os.listdir(os.path.join(self.root, self.tags_folder)):
             inode_path = os.path.join(self.root, self.tags_folder, tag, str(inode))
             if os.path.isdir(inode_path):
                 os.rmdir(inode_path)
@@ -285,7 +285,7 @@ class TaggedFS(LoggingMixIn, Operations):
 
         # We've found the file path!
         fpath, inode = result
-        fh = open(fpath, "r+b")
+        fh = open(fpath.get_path(), "r+b")
 
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, data)
@@ -315,6 +315,10 @@ class TaggedFS(LoggingMixIn, Operations):
         fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in str(inode)])), self.root)
         fpath = utils.Path.join_paths(fpath, utils.Path(fname))
         
+        # Create directories as necessary
+        if not os.path.exists(os.path.dirname(fpath.get_path())):
+            os.makedirs(os.path.dirname(fpath.get_path()))
+
         # Create file
         os.open(fpath.get_path(), os.O_WRONLY | os.O_CREAT, mode)
         return
@@ -324,7 +328,7 @@ class TaggedFS(LoggingMixIn, Operations):
         fpath = utils.Path.join_paths(fpath, utils.Path(fname))
         
         # Remove file if it exists
-        os.remove(fpath)
+        os.remove(fpath.get_path())
         return
 
     def getInodeFilepath(self, inode):
@@ -334,7 +338,7 @@ class TaggedFS(LoggingMixIn, Operations):
         if len(files) == 0:
             return None
 
-        return utils.Path.join_paths(filefolder, utils.Path(fname))
+        return utils.Path.join_paths(filefolder, utils.Path(files[0]))
 
     def getInodeFilepaths(self, inodes):
         filepaths = []
