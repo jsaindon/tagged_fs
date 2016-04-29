@@ -312,7 +312,7 @@ class TaggedFS(LoggingMixIn, Operations):
         shutil.rmtree(tag_path)
 
     def addFile(self, inode, fname, mode):
-        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in str(inode)])), self.root)
         fpath = utils.Path.join_paths(fpath, utils.Path(fname))
         
         # Create file
@@ -320,7 +320,7 @@ class TaggedFS(LoggingMixIn, Operations):
         return
 
     def removeFile(self, inode, fname):
-        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+        fpath = utils.Path(os.path.join(self.file_folder, "/".join([char for char in str(inode)])), self.root)
         fpath = utils.Path.join_paths(fpath, utils.Path(fname))
         
         # Remove file if it exists
@@ -328,7 +328,7 @@ class TaggedFS(LoggingMixIn, Operations):
         return
 
     def getInodeFilepath(self, inode):
-        filefolder = utils.Path(os.path.join(self.file_folder, "/".join([char for char in reversed(str(inode))])), self.root)
+        filefolder = utils.Path(os.path.join(self.file_folder, "/".join([char for char in str(inode)])), self.root)
         files = [fname for fname in os.listdir(filefolder.get_path()) if os.path.isfile(os.path.join(filefolder.get_path(), fname))]
 
         if len(files) == 0:
